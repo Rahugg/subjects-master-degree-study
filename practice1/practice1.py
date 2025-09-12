@@ -2,19 +2,19 @@
 text = 'Data Science is awesome'
 
 wordsCnt = len(text.split())
-print("Words count", wordsCnt)
+print("Words count:", wordsCnt)
 
 upperString = text.upper()
-print("UPPER STRING", upperString)
+print("UPPER STRING:", upperString)
 
 last3Chars = text[-3:]
-print("Last 3 characters", last3Chars)
+print("Last 3 characters:", last3Chars)
 
 print('-' * 10)
 # task 2
 gradesOfStudents = [90, 80, 70, 60]
 gpa = sum(gradesOfStudents) / len(gradesOfStudents)
-print("GPA", gpa)
+print("GPA:", gpa)
 
 studentsGrades = {
     "Alex": 95,
@@ -27,11 +27,11 @@ for i in studentsGrades:
     if studentsGrades[i] > mxGrade:
         mxGrade = studentsGrades[i]
         mxName = i
-print("The student with maximum grade", mxName)
+print("The student with maximum grade:", mxName)
 
 textToUnique = 'Lorem lorem ipsum ipsum a a a a A b B z'
 uniqueWords = set(textToUnique.split())
-print("Unique words", uniqueWords)
+print("Unique words:", uniqueWords)
 
 print('-' * 10)
 
@@ -40,14 +40,14 @@ print('-' * 10)
 def maxStudentGrade(studentsList, grade):
     for student in studentsList:
         if student["grade"] > grade:
-            print("the student who has more than", grade, "is", student["name"])
+            print("the student who has more than", grade, "is:", student["name"])
 
 def avgGrade(studentsList):
     sumGrades = 0
     for student in studentsList:
         sumGrades += student["grade"]
 
-    print("The average grade is", sumGrades / len(studentsList))
+    print("The average grade is:", sumGrades / len(studentsList))
 
 def minMaxGrade(studentsList):
     minGrade = 101
@@ -57,8 +57,8 @@ def minMaxGrade(studentsList):
             minGrade = student["grade"]
         if student["grade"] > mxGrade:
             mxGrade = student["grade"]
-    print("The minimum grade is", minGrade)
-    print("The maximum grade is", mxGrade)
+    print("The minimum grade is:", minGrade)
+    print("The maximum grade is:", mxGrade)
 
 
 students = [
