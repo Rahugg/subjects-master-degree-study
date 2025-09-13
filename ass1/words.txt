@@ -1,0 +1,2 @@
+Python is a high-level, interpreted programming language that has gained immense popularity in recent years. It was first created in the late 1980s by Guido van Rossum, and since then, it has become one of the most widely used programming languages in the world.
+PYTHON is known for its simplicity and ease of use, which makes it an ideal language for beginners. It has a straightforward syntax and requires less code than other programming languages, which means that developers can focus on solving problems rather than writing long lines of code. Python_Python_proGRAMming
