@@ -91,4 +91,32 @@ if len(needFiles) > 0:
     print(needFiles)
 else:
     print("No file found")
+import re
 
+# task 3
+letterCnt = {}
+
+with open("file.txt", 'r') as text_file:
+    for line in text_file:
+        for letter in line.lower():
+            if 'a' <= letter <= 'z':
+                letterCnt[letter] = letterCnt.get(letter, 0) + 1
+
+print(letterCnt)
+print("Number of latin letters", sum(letterCnt.values()))
+
+pattern = re.compile(r"[A-Za-zА-Яа-яЁё]+")
+wordCnt = 0
+with open("file.txt", "r") as text_file:
+    for line in text_file:
+        wordCnt += len(pattern.findall(line))
+print("Words count", wordCnt)
+
+lineCnt = 0
+with open("file.txt", "r") as f:
+    for _ in f:
+        lineCnt += 1
+
+print("Lines count", lineCnt)
+
+# task 4
