@@ -43,7 +43,7 @@ pathToResult = pl.Path("project/results/report.json")
 if pathToResult.exists():
     print("Size:", pathToResult.stat().st_size, "bytes")
     print(f"Modification date {datetime.fromtimestamp(pathToResult.stat().st_mtime):%Y-%m-%d %H:%M:%S}")
-
+print("-"*20)
 # task 2
 
 try:
@@ -91,9 +91,11 @@ if len(needFiles) > 0:
     print(needFiles)
 else:
     print("No file found")
+
+print("-"*20)
+# task 3
 import re
 
-# task 3
 letterCnt = {}
 
 with open("file.txt", 'r') as text_file:
@@ -118,5 +120,33 @@ with open("file.txt", "r") as f:
         lineCnt += 1
 
 print("Lines count", lineCnt)
+print("-"*20)
 
 # task 4
+
+with open("forbidden_words.txt", "r") as f:
+    forbidden = [w.lower() for w in f.read().split() if w]
+
+with open("words.txt", "r") as f:
+    s = f.read()
+
+res = []
+i = 0
+n = len(s)
+
+while i < n:
+    best_len = 0
+    for word in forbidden:
+        forbiddenWordLen = len(word)
+        if forbiddenWordLen and i + forbiddenWordLen <= n and s[i:i + forbiddenWordLen].lower() == word:
+            if forbiddenWordLen > best_len:
+                best_len = forbiddenWordLen
+
+    if best_len > 0:
+        res.append("*" * best_len)
+        i += best_len
+    else:
+        res.append(s[i])
+        i += 1
+
+print("".join(res), end="")
