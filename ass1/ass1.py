@@ -44,6 +44,7 @@ if pathToResult.exists():
     print("Size:", pathToResult.stat().st_size, "bytes")
     print(f"Modification date {datetime.fromtimestamp(pathToResult.stat().st_mtime):%Y-%m-%d %H:%M:%S}")
 print("-"*20)
+
 # task 2
 
 try:
@@ -88,7 +89,7 @@ for entry in os.scandir("generated_txtfiles"):
         except FileNotFoundError:
             print("File not found")
 if len(needFiles) > 0:
-    print(needFiles)
+    print("files that contains searchWord", needFiles)
 else:
     print("No file found")
 
