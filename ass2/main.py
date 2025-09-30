@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-# Runs all assignments by LOADING pre-extracted CSVs (no PDF parsing).
-# Place these CSVs next to this script:
-#   - flight_delays_from_pdf.csv
-#   - traffic_congestion_astana.csv
-#   - cold_days_from_pdf.csv   (may be header-only if you don't have the numbers)
-
 import os
 import warnings
 from time import perf_counter
