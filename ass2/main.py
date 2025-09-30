@@ -1,285 +1,338 @@
 #!/usr/bin/env python3
-# Astana ML reports: linear (cold days) and logistic (flight delays).
-# - Shows future predictions (2025/2030/2035) on the linear plot
-# - Tolerant to real-world CSV quirks for the logistic part
+# Runs all assignments by LOADING pre-extracted CSVs (no PDF parsing).
+# Place these CSVs next to this script:
+#   - flight_delays_from_pdf.csv
+#   - traffic_congestion_astana.csv
+#   - cold_days_from_pdf.csv   (may be header-only if you don't have the numbers)
 
 import os
-from time import perf_counter
 import warnings
+from time import perf_counter
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 import numpy as np
-np.seterr(all="ignore")
-
 import pandas as pd
 import matplotlib.pyplot as plt
 
 from sklearn.linear_model import LinearRegression, LogisticRegression
-from sklearn.metrics import mean_squared_error, accuracy_score
+from sklearn.metrics import mean_squared_error, accuracy_score, precision_score, recall_score
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
 
-SAFE_MIN, SAFE_MAX = -500.0, 500.0
 OUT_DIR = "./reports_out"
-COLD_CSV = "astana_cold_days.csv"
-FLIGHTS_CSV = "astana_flight_delays.csv"
-FUTURE_YEARS = (2025, 2030, 2035)
-CASE_A = (-28, 1, 9, 2)   # T, Snow, Wind, Vis
-CASE_B = (-12, 0, 3, 10)
+FLIGHT_CSV  = "flight_delays_from_pdf.csv"
+TRAFFIC_CSV = "traffic_congestion_astana.csv"
+COLD_CSV    = "cold_days_from_pdf.csv"   # columns: year,cold_days_below_minus30
 
-def normalize(x: np.ndarray):
-    # z = (x - mu) / sigma
-    mu = x.mean(axis=0, keepdims=True)
-    sigma = x.std(axis=0, keepdims=True) + 1e-8
-    return (x - mu) / sigma, mu, sigma
+# -------- Linear regression (Normal Equation) --------
+def linear_normal_eq(X: np.ndarray, y: np.ndarray):
+    t0 = perf_counter()
+    theta, *_ = np.linalg.lstsq(X, y, rcond=None)
+    t = perf_counter() - t0
+    b = float(theta[0]); w = theta[1:].astype(float)
+    return w, b, t
 
-def denorm_coef(w: np.ndarray, b: float, mu: np.ndarray, sigma: np.ndarray):
-    # Convert weights learned on normalized X back to original units
-    w_orig = w / sigma.ravel()
-    b_orig = b - (mu @ (w / sigma).T).item()
-    return w_orig, b_orig
-
-def sigmoid_stable(z: np.ndarray):
-    # Numerically safe sigmoid
-    z = np.clip(z, SAFE_MIN, SAFE_MAX)
+# -------- Logistic regression (from scratch, GD + L2 on weights) --------
+def sigmoid(z):
+    z = np.clip(z, -500, 500)
     return 1.0 / (1.0 + np.exp(-z))
 
-def safe_matmul(a: np.ndarray, b: np.ndarray):
-    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-        return a @ b
-
-def gd_linear(X: np.ndarray, y: np.ndarray, lr: float = 0.05, epochs: int = 4000):
-    # Linear regression via batch GD on MSE (bias handled by prepend-ones trick)
-    Xn, mu, sigma = normalize(X)
-    Xb = np.c_[np.ones(len(Xn)), Xn].astype(np.float64, copy=False)
-    w = np.zeros(Xb.shape[1], dtype=np.float64)
+def logistic_gd(Xb: np.ndarray, y: np.ndarray, lr=0.1, epochs=8000, l2=1e-4):
+    w = np.zeros(Xb.shape[1])
+    reg = np.r_[0.0, np.full(Xb.shape[1]-1, l2)]  # no penalty on bias
     t0 = perf_counter()
     for _ in range(epochs):
-        yhat = safe_matmul(Xb, w)
-        grad = (2 / len(Xb)) * safe_matmul(Xb.T, (yhat - y))
+        p = sigmoid(Xb @ w)
+        grad = (Xb.T @ (p - y)) / len(y) + reg * w
         w -= lr * grad
     t = perf_counter() - t0
-    w_denorm, b_denorm = denorm_coef(w[1:], w[0], mu, sigma)
-    return w_denorm, b_denorm, t
+    b = float(w[0]); weights = w[1:].copy()
+    return weights, b, t
 
-def gd_logistic(X: np.ndarray, y: np.ndarray, lr: float = 0.05, epochs: int = 3000, l2: float = 1e-4):
-    # Logistic regression via batch GD with L2 on weights (bias unpenalized)
-    Xn, mu, sigma = normalize(X)
-    Xb = np.c_[np.ones(len(Xn)), Xn].astype(np.float64, copy=False)
-    w = np.zeros(Xb.shape[1], dtype=np.float64)
-    reg = np.r_[0.0, np.full(Xn.shape[1], l2)]
+# -------- SVM (from scratch, linear, hinge loss, SGD) --------
+def svm_linear_sgd(X: np.ndarray, y: np.ndarray, C=1.0, epochs=60, lr0=0.2):
+    yb = np.where(y==1, 1.0, -1.0)
+    w = np.zeros(X.shape[1], dtype=float)
+    b = 0.0
     t0 = perf_counter()
-    for _ in range(epochs):
-        lin = np.clip(safe_matmul(Xb, w), SAFE_MIN, SAFE_MAX)
-        yhat = 1.0 / (1.0 + np.exp(-lin))
-        grad = (1 / len(Xb)) * safe_matmul(Xb.T, (yhat - y)) + reg * w
-        w -= lr * grad
+    for epoch in range(epochs):
+        lr = lr0 / (1.0 + 0.1*epoch)
+        for i in range(len(X)):
+            margin = yb[i]*(np.dot(w, X[i]) + b)
+            if margin >= 1:
+                w -= lr * (w / (C*len(X)))
+            else:
+                w -= lr * (w / (C*len(X)) - yb[i]*X[i])
+                b += lr * yb[i]
     t = perf_counter() - t0
-    w_denorm, b_denorm = denorm_coef(w[1:], w[0], mu, sigma)
-    return w_denorm, b_denorm, t
+    return w, b, t
 
+def svm_predict_proba_linear(X: np.ndarray, w: np.ndarray, b: float):
+    return sigmoid(X @ w + b)  # quick calibration
+
+# -------- Decision Tree (from scratch, binary splits, max_depth=3) --------
+class DTNode:
+    __slots__ = ("feat","thr","left","right","pred","depth")
+    def __init__(self, pred=None, feat=None, thr=None, left=None, right=None, depth=0):
+        self.pred = pred; self.feat = feat; self.thr = thr
+        self.left = left; self.right = right; self.depth = depth
+
+def gini_impurity(y):
+    if len(y)==0: return 0.0
+    p = np.mean(y==1)
+    return 2*p*(1-p)
+
+def best_split(X, y):
+    n, d = X.shape
+    best = (None, None, -1e9)
+    for j in range(d):
+        vals = np.unique(X[:, j])
+        for thr in vals:
+            left = y[X[:, j] <= thr]
+            right = y[X[:, j] > thr]
+            if len(left)==0 or len(right)==0: continue
+            gain = - (len(left)/n)*gini_impurity(left) - (len(right)/n)*gini_impurity(right)
+            if gain > best[2]:
+                best = (j, thr, gain)
+    return best[0], best[1]
+
+def build_tree(X, y, depth=0, max_depth=3, min_leaf=5):
+    if depth>=max_depth or len(np.unique(y))==1 or len(y)<2*min_leaf:
+        return DTNode(pred=int(np.round(np.mean(y))), depth=depth)
+    j, thr = best_split(X, y)
+    if j is None:
+        return DTNode(pred=int(np.round(np.mean(y))), depth=depth)
+    left_idx = X[:, j] <= thr
+    right_idx = ~left_idx
+    if left_idx.sum()<min_leaf or right_idx.sum()<min_leaf:
+        return DTNode(pred=int(np.round(np.mean(y))), depth=depth)
+    left = build_tree(X[left_idx], y[left_idx], depth+1, max_depth, min_leaf)
+    right = build_tree(X[right_idx], y[right_idx], depth+1, max_depth, min_leaf)
+    return DTNode(feat=j, thr=thr, left=left, right=right, depth=depth)
+
+def tree_predict_one(x, node: DTNode):
+    while node.left is not None and node.right is not None:
+        node = node.left if x[node.feat] <= node.thr else node.right
+    return node.pred
+
+def tree_predict(X, root: DTNode):
+    return np.array([tree_predict_one(x, root) for x in X], dtype=int)
+
+# -------- Main --------
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    # -----------------------------
-    # Linear regression: cold days
-    # -----------------------------
-    lin_df = pd.read_csv(COLD_CSV)
-    if not {"year", "cold_days_below_minus30"}.issubset(lin_df.columns):
-        raise ValueError(f"{COLD_CSV} must have columns: 'year', 'cold_days_below_minus30'")
-    lin_df = (lin_df[["year", "cold_days_below_minus30"]]
-              .apply(pd.to_numeric, errors="coerce")
-              .dropna()
-              .sort_values("year")
-              .reset_index(drop=True))
-    X_lin = lin_df[["year"]].to_numpy(dtype=np.float64, copy=False)
-    y_lin = lin_df["cold_days_below_minus30"].to_numpy(dtype=np.float64, copy=False)
+    # =========================
+    # Assignment 1: Linear Task
+    # =========================
+    if os.path.exists(COLD_CSV):
+        cold_df = pd.read_csv(COLD_CSV)
+    else:
+        cold_df = pd.DataFrame(columns=["year","cold_days_below_minus30"])
 
-    w_lin, b_lin, t_lin = gd_linear(X_lin, y_lin)
-    yhat_lin = X_lin.ravel() * w_lin[0] + b_lin
-    rmse_lin = float(np.sqrt(mean_squared_error(y_lin, yhat_lin)))
+    if not cold_df.empty and {"year","cold_days_below_minus30"}.issubset(cold_df.columns):
+        lin_df = (cold_df[["year","cold_days_below_minus30"]]
+                  .apply(pd.to_numeric, errors="coerce")
+                  .dropna()
+                  .sort_values("year"))
+        if not lin_df.empty:
+            lin_df = lin_df[lin_df["year"] >= 2010]
+    else:
+        lin_df = pd.DataFrame()
 
-    t0 = perf_counter()
-    sk_lin = LinearRegression().fit(X_lin, y_lin)
-    t_lin_sk = perf_counter() - t0
-    rmse_lin_sk = float(np.sqrt(mean_squared_error(y_lin, sk_lin.predict(X_lin))))
+    if not lin_df.empty:
+        X_lin = lin_df[["year"]].to_numpy(float)
+        y_lin = lin_df["cold_days_below_minus30"].to_numpy(float)
 
-    fy = np.array(FUTURE_YEARS, dtype=np.int64)
-    future_years_arr = fy.reshape(-1, 1).astype(np.float64)
-    pred_ours_lin = np.maximum(0, future_years_arr.ravel() * w_lin[0] + b_lin)
-    pred_sk_lin = np.maximum(0, sk_lin.predict(future_years_arr))
+        Xb = np.c_[np.ones(len(X_lin)), X_lin]
+        w_lin, b_lin, t_lin_ours = linear_normal_eq(Xb, y_lin)
+        yhat_ours = (Xb @ np.r_[b_lin, w_lin]).ravel()
+        rmse_ours = float(np.sqrt(mean_squared_error(y_lin, yhat_ours)))
 
-    lin_summary = pd.DataFrame({
-        "model": ["From-scratch GD", "scikit-learn"],
-        "coef": [float(w_lin[0]), float(sk_lin.coef_[0])],
-        "intercept": [float(b_lin), float(sk_lin.intercept_)],
-        "rmse": [rmse_lin, rmse_lin_sk],
-        "train_time_s": [float(t_lin), float(t_lin_sk)],
-    })
-    pred_years_df = pd.DataFrame({"year": fy,
-                                  "pred_days_ours": pred_ours_lin,
-                                  "pred_days_sklearn": pred_sk_lin})
+        t0 = perf_counter()
+        sk_lin = LinearRegression().fit(X_lin, y_lin)
+        t_lin_sk = perf_counter() - t0
+        rmse_sk = float(np.sqrt(mean_squared_error(y_lin, sk_lin.predict(X_lin))))
 
-    # Plot: historical points + extended fits + future markers
-    plt.figure()
-    plt.scatter(X_lin.ravel(), y_lin, label="Data")
-    x_all = np.concatenate([X_lin.ravel(), future_years_arr.ravel()])
-    x_grid = np.linspace(x_all.min(), x_all.max(), 300).reshape(-1, 1)
-    plt.plot(x_grid.ravel(), x_grid.ravel() * w_lin[0] + b_lin, label="From-scratch fit")
-    plt.plot(x_grid.ravel(), sk_lin.predict(x_grid), label="sklearn fit")
-    plt.scatter(FUTURE_YEARS, pred_ours_lin, s=60, label="Predictions")
-    for yr, yv in zip(FUTURE_YEARS, pred_ours_lin):
-        yv = max(0, yv)
-        plt.annotate(f"{int(yr)}: {yv:.2f}", xy=(yr, yv), xytext=(5, 5), textcoords="offset points")
-    plt.xlabel("Year")
-    plt.ylabel("Days below –30°C")
-    plt.title("Astana: Cold Days Trend (Linear Regression)")
-    plt.legend()
-    plt.savefig(os.path.join(OUT_DIR, "plot_linear_cold_days.png"), bbox_inches="tight", dpi=160)
-    plt.close()
+        fy = np.array([2025, 2030, 2035], dtype=float).reshape(-1,1)
+        pred_ours = np.maximum(0, (np.c_[np.ones(len(fy)), fy] @ np.r_[b_lin, w_lin]).ravel())
+        pred_sk = np.maximum(0, sk_lin.predict(fy))
 
-    # -----------------------------------
-    # Logistic regression: flight delays
-    # -----------------------------------
-    log_df = pd.read_csv(FLIGHTS_CSV)
+        pd.DataFrame({
+            "model": ["NormalEq (ours)", "scikit-learn"],
+            "coef": [float(w_lin[0]), float(sk_lin.coef_[0])],
+            "intercept": [float(b_lin), float(sk_lin.intercept_)],
+            "rmse": [rmse_ours, rmse_sk],
+            "train_time_s": [t_lin_ours, t_lin_sk]
+        }).to_csv(os.path.join(OUT_DIR, "linear_summary.csv"), index=False)
 
-    # Minimal resilience to real datasets
-    for col in ["temperature", "snowfall", "wind", "visibility", "delayed"]:
-        if col not in log_df.columns:
-            log_df[col] = np.nan
+        pd.DataFrame({
+            "year": [2025, 2030, 2035],
+            "pred_days_ours": pred_ours,
+            "pred_days_sklearn": pred_sk
+        }).to_csv(os.path.join(OUT_DIR, "linear_future_predictions.csv"), index=False)
 
-    # Heuristic unit normalizations (remove if you are certain about units)
-    if log_df["snowfall"].max(skipna=True) and log_df["snowfall"].max(skipna=True) > 50:
-        log_df["snowfall"] = log_df["snowfall"] / 10.0      # mm -> cm
-    if log_df["wind"].max(skipna=True) and log_df["wind"].max(skipna=True) < 35:
-        log_df["wind"] = log_df["wind"] * 3.6               # m/s -> km/h
+        # Plot
+        plt.figure()
+        plt.scatter(X_lin.ravel(), y_lin, label="Data (>=2010)")
+        x_all = np.concatenate([X_lin.ravel(), fy.ravel()])
+        xg = np.linspace(x_all.min(), x_all.max(), 200).reshape(-1,1)
+        ours_line = (np.c_[np.ones(len(xg)), xg] @ np.r_[b_lin, w_lin]).ravel()
+        sk_line = sk_lin.predict(xg)
+        plt.plot(xg.ravel(), ours_line, label="NormalEq (ours)")
+        plt.plot(xg.ravel(), sk_line, label="sklearn")
+        plt.scatter([2025,2030,2035], pred_ours, s=60, label="Predictions")
+        for yr, yv in zip([2025,2030,2035], pred_ours):
+            plt.annotate(f"{int(yr)}: {yv:.2f}", xy=(yr, yv), xytext=(5,5), textcoords="offset points")
+        plt.xlabel("Year"); plt.ylabel("Days < −30°C")
+        plt.title("Cold days (trained on ≥ 2010)")
+        plt.legend()
+        plt.savefig(os.path.join(OUT_DIR, "linear_trend.png"), bbox_inches="tight", dpi=160)
+        plt.close()
+    else:
+        with open(os.path.join(OUT_DIR, "linear_INFO.txt"), "w") as f:
+            f.write("No usable rows in cold_days_from_pdf.csv; linear task skipped.\n")
 
-    for c in ["temperature", "snowfall", "wind", "visibility", "delayed"]:
-        log_df[c] = pd.to_numeric(log_df[c], errors="coerce")
+    # ==================================
+    # Assignment 2: Logistic (7-row demo)
+    # ==================================
+    log_df = pd.read_csv(FLIGHT_CSV)
+    X_log = log_df[["temperature","snowfall","wind","visibility"]].to_numpy(float)
+    y_log = log_df["delayed"].to_numpy(int)
 
-    # Auto-proxy label only if labels missing (transparent fallback)
-    if log_df["delayed"].isna().all():
-        proxy = (
-            (log_df["temperature"] <= -25) |
-            (log_df["snowfall"].fillna(0) > 0.5) |
-            (log_df["wind"].fillna(0) >= 28) |
-            (log_df["visibility"].fillna(10) <= 2.0)
-        ).astype(int)
-        log_df["delayed"] = proxy
-
-    log_df = log_df.dropna(subset=["temperature", "snowfall", "wind", "visibility", "delayed"]).reset_index(drop=True)
-
-    X_log = log_df[["temperature", "snowfall", "wind", "visibility"]].to_numpy(dtype=np.float64, copy=False)
-    y_log = log_df["delayed"].astype(int, copy=False).to_numpy()
-
-    w_log, b_log, t_log = gd_logistic(X_log, y_log)
-    proba_ours = sigmoid_stable(safe_matmul(X_log, w_log) + b_log)
-    pred_ours = (proba_ours >= 0.5).astype(int, copy=False)
-    acc_ours = float(accuracy_score(y_log, pred_ours))
+    Xb = np.c_[np.ones(len(X_log)), X_log]
+    w_log, b_log, t_log_ours = logistic_gd(Xb, y_log, lr=0.1, epochs=8000, l2=1e-4)
+    p_ours = sigmoid(Xb @ np.r_[b_log, w_log])
+    acc_ours = accuracy_score(y_log, (p_ours>=0.5).astype(int))
 
     t0 = perf_counter()
-    sk_log = LogisticRegression(max_iter=2000).fit(X_log, y_log)
+    sk_lr = LogisticRegression(max_iter=5000).fit(X_log, y_log)
     t_log_sk = perf_counter() - t0
-    proba_sk = sk_log.predict_proba(X_log)[:, 1]
-    pred_sk = (proba_sk >= 0.5).astype(int, copy=False)
-    acc_sk = float(accuracy_score(y_log, pred_sk))
+    p_sk = sk_lr.predict_proba(X_log)[:,1]
+    acc_sk = accuracy_score(y_log, (p_sk>=0.5).astype(int))
 
-    log_summary = pd.DataFrame({
+    caseA = np.array([[-28, 1, 9, 2]], dtype=float)
+    caseB = np.array([[-12, 0, 3, 10]], dtype=float)
+
+    # From-scratch model
+    pA_ours = sigmoid(np.c_[np.ones((1, 1)), caseA] @ np.r_[b_log, w_log]).item()
+    pB_ours = sigmoid(np.c_[np.ones((1, 1)), caseB] @ np.r_[b_log, w_log]).item()
+
+    # scikit-learn
+    pA_sk = sk_lr.predict_proba(caseA)[0, 1].item()
+    pB_sk = sk_lr.predict_proba(caseB)[0, 1].item()
+
+    pd.DataFrame({
         "model": ["From-scratch GD (L2=1e-4)", "scikit-learn"],
-        "coef_or_weights": [list(np.round(w_log, 6)), list(np.round(sk_log.coef_.ravel(), 6))],
-        "intercept": [float(b_log), float(sk_log.intercept_[0])],
         "accuracy": [acc_ours, acc_sk],
-        "train_time_s": [float(t_log), float(t_log_sk)]
-    })
+        "train_time_s": [t_log_ours, t_log_sk],
+        "weights_or_coef": [np.round(w_log,6).tolist(), np.round(sk_lr.coef_.ravel(),6).tolist()],
+        "intercept": [b_log, float(sk_lr.intercept_[0])]
+    }).to_csv(os.path.join(OUT_DIR, "logistic_summary.csv"), index=False)
 
-    # Two demo cases (A/B) as requested
-    cases = pd.DataFrame(
-        {"temperature": [CASE_A[0], CASE_B[0]],
-         "snowfall": [CASE_A[1], CASE_B[1]],
-         "wind": [CASE_A[2], CASE_B[2]],
-         "visibility": [CASE_A[3], CASE_B[3]]},
-        index=["Case A", "Case B"]
-    )
-    X_cases = cases.to_numpy(dtype=np.float64, copy=False)
-    proba_cases_ours = sigmoid_stable(safe_matmul(X_cases, w_log) + b_log)
-    proba_cases_sk = sk_log.predict_proba(X_cases)[:, 1]
-    pred_cases_ours = (proba_cases_ours >= 0.5).astype(int, copy=False)
-    pred_cases_sk = (proba_cases_sk >= 0.5).astype(int, copy=False)
-    cases_out = pd.DataFrame({
-        "case": cases.index,
-        "ours_prob": proba_cases_ours,
-        "ours_class": pred_cases_ours,
-        "sklearn_prob": proba_cases_sk,
-        "sklearn_class": pred_cases_sk
-    })
+    pd.DataFrame({
+        "case": ["A(-28,1,9,2)","B(-12,0,3,10)"],
+        "ours_prob": [pA_ours, pB_ours],
+        "ours_class": [int(pA_ours>=0.5), int(pB_ours>=0.5)],
+        "sk_prob": [pA_sk, pB_sk],
+        "sk_class": [int(pA_sk>=0.5), int(pB_sk>=0.5)]
+    }).to_csv(os.path.join(OUT_DIR, "logistic_cases.csv"), index=False)
 
-    # Probability vs wind while holding others at dataset means
-    means = log_df[["temperature", "snowfall", "visibility"]].mean()
-    wind_grid = np.linspace(log_df["wind"].min(), log_df["wind"].max(), 100)
-    grid_features = np.column_stack([
+    # Optional plot: prob vs wind (others fixed at mean of demo table)
+    means = log_df[["temperature","snowfall","visibility"]].mean()
+    wind_grid = np.linspace(log_df["wind"].min(), log_df["wind"].max(), 120)
+    grid = np.column_stack([
         np.full_like(wind_grid, means["temperature"], dtype=float),
-        np.full_like(wind_grid, means["snowfall"], dtype=float),
+        np.full_like(wind_grid, round(log_df["snowfall"].mean()), dtype=float),
         wind_grid.astype(float),
         np.full_like(wind_grid, means["visibility"], dtype=float),
     ])
-    proba_grid_ours = sigmoid_stable(safe_matmul(grid_features, w_log) + b_log)
-    proba_grid_sk = sk_log.predict_proba(grid_features)[:, 1]
-
+    ours_curve = sigmoid(np.c_[np.ones(len(grid)), grid] @ np.r_[b_log, w_log])
+    sk_curve = sk_lr.predict_proba(grid)[:,1]
     plt.figure()
-    plt.plot(wind_grid, proba_grid_ours, label="From-scratch")
-    plt.plot(wind_grid, proba_grid_sk, label="scikit-learn")
-    plt.xlabel("Wind")
-    plt.ylabel("Delay probability")
-    plt.title("Flight delay probability vs wind (others fixed at mean)")
+    plt.plot(wind_grid, ours_curve, label="From-scratch")
+    plt.plot(wind_grid, sk_curve, label="sklearn")
+    plt.xlabel("Wind (m/s)"); plt.ylabel("Delay probability")
+    plt.title("Delay probability vs Wind (demo table)")
     plt.legend()
-    plt.savefig(os.path.join(OUT_DIR, "plot_logistic_delay_vs_wind.png"), bbox_inches="tight", dpi=160)
+    plt.savefig(os.path.join(OUT_DIR, "logistic_prob_vs_wind.png"), bbox_inches="tight", dpi=160)
     plt.close()
 
-    # Outputs
-    lin_summary.to_csv(os.path.join(OUT_DIR, "linear_summary.csv"), index=False)
-    pred_years_df.to_csv(os.path.join(OUT_DIR, "linear_future_predictions.csv"), index=False)
-    log_summary.to_csv(os.path.join(OUT_DIR, "logistic_summary.csv"), index=False)
-    cases_out.to_csv(os.path.join(OUT_DIR, "logistic_cases.csv"), index=False)
+    # ============================================
+    # Assignment 3: Traffic Congestion (SVM & DT)
+    # ============================================
+    traffic_df = pd.read_csv(TRAFFIC_CSV)
+    feats = ["hour","day_of_week","temperature","precipitation","event"]
+    X_tr = traffic_df[feats].to_numpy(float)
+    y_tr = traffic_df["congestion"].to_numpy(int)
 
-    with pd.ExcelWriter(os.path.join(OUT_DIR, "astana_reports.xlsx"), engine="xlsxwriter") as xlw:
-        lin_summary.to_excel(xlw, sheet_name="linear_summary", index=False)
-        pred_years_df.to_excel(xlw, sheet_name="linear_future_predictions", index=False)
-        log_summary.to_excel(xlw, sheet_name="logistic_summary", index=False)
-        cases_out.to_excel(xlw, sheet_name="logistic_cases", index=False)
+    # SVM (scratch)
+    w_svm, b_svm, t_svm_ours = svm_linear_sgd(X_tr, y_tr, C=1.0, epochs=60, lr0=0.2)
+    yhat_svm = (X_tr @ w_svm + b_svm >= 0).astype(int)
+    acc_svm = accuracy_score(y_tr, yhat_svm)
+    prec_svm = precision_score(y_tr, yhat_svm)
+    rec_svm  = recall_score(y_tr, yhat_svm)
 
-    # Minimal markdown summary for quick review
-    md = []
-    md.append("# Astana Regression Reports\n")
-    md.append("## Linear Regression\n")
-    md.append(lin_summary.round(6).to_markdown(index=False))
-    md.append("\n\n### Future Predictions\n")
-    md.append(pred_years_df.round(2).to_markdown(index=False))
-    md.append("\n\n![](plot_linear_cold_days.png)\n")
-    md.append("\n## Logistic Regression\n")
-    md.append(log_summary.to_markdown(index=False))
-    md.append("\n\n### Cases A/B\n")
-    md.append(cases_out.round({"ours_prob":4, "sklearn_prob":4}).to_markdown(index=False))
-    md.append("\n\n![](plot_logistic_delay_vs_wind.png)\n")
-    with open(os.path.join(OUT_DIR, "astana_reports.md"), "w", encoding="utf-8") as f:
-        f.write("\n".join(md))
+    # Decision Tree (scratch)
+    t0 = perf_counter()
+    tree_root = build_tree(X_tr, y_tr, max_depth=3, min_leaf=5)
+    t_dt_ours = perf_counter() - t0
+    yhat_dt = tree_predict(X_tr, tree_root)
+    acc_dt = accuracy_score(y_tr, yhat_dt)
+    prec_dt = precision_score(y_tr, yhat_dt)
+    rec_dt  = recall_score(y_tr, yhat_dt)
 
-    # Console recap
-    print("=== Linear Regression – From Scratch ===")
-    print(f"coef={w_lin[0]:.6f}  intercept={b_lin:.6f}  rmse={rmse_lin:.6f}  time_s={t_lin:.6f}")
-    print("=== Linear Regression – scikit-learn ===")
-    print(f"coef={sk_lin.coef_[0]:.6f}  intercept={sk_lin.intercept_:.6f}  rmse={rmse_lin_sk:.6f}  time_s={t_lin_sk:.6f}")
-    for yr, a, b in zip(fy, pred_ours_lin, pred_sk_lin):
-        print(f"{int(yr)}: ours={a:.2f}, sklearn={b:.2f}")
+    # sklearn baselines
+    t0 = perf_counter(); svc = SVC(probability=True).fit(X_tr, y_tr); t_svm_sk = perf_counter()-t0
+    t0 = perf_counter(); dtc = DecisionTreeClassifier(max_depth=3).fit(X_tr, y_tr); t_dt_sk = perf_counter()-t0
+    yhat_svc = svc.predict(X_tr); yhat_dtc = dtc.predict(X_tr)
+    svc_metrics = dict(acc=accuracy_score(y_tr,yhat_svc), prec=precision_score(y_tr,yhat_svc), rec=recall_score(y_tr,yhat_svc))
+    dtc_metrics = dict(acc=accuracy_score(y_tr,yhat_dtc), prec=precision_score(y_tr,yhat_dtc), rec=recall_score(y_tr,yhat_dtc))
 
-    print("\n=== Logistic Regression – From Scratch ===")
-    print(f"weights={np.round(w_log,6).tolist()}  intercept={b_log:.6f}  acc={acc_ours:.6f}  time_s={t_log:.6f}")
-    print("=== Logistic Regression – scikit-learn ===")
-    print(f"weights={np.round(sk_log.coef_.ravel(),6).tolist()}  intercept={sk_log.intercept_[0]:.6f}  acc={acc_sk:.6f}  time_s={t_log_sk:.6f}")
+    pd.DataFrame([
+        {"model":"SVM-from-scratch", "acc":acc_svm, "prec":prec_svm, "rec":rec_svm, "train_time_s":t_svm_ours},
+        {"model":"DT-from-scratch (max_depth=3)", "acc":acc_dt, "prec":prec_dt, "rec":rec_dt, "train_time_s":t_dt_ours},
+        {"model":"SVC(sklearn)", "acc":svc_metrics["acc"], "prec":svc_metrics["prec"], "rec":svc_metrics["rec"], "train_time_s":t_svm_sk},
+        {"model":"DecisionTree(max_depth=3)", "acc":dtc_metrics["acc"], "prec":dtc_metrics["prec"], "rec":dtc_metrics["rec"], "train_time_s":t_dt_sk},
+    ]).to_csv(os.path.join(OUT_DIR, "traffic_summary.csv"), index=False)
 
-    print("\n=== Flight Delay Predictions (Cases) ===")
-    for name, p1, c1, p2, c2 in zip(["Case A", "Case B"], proba_cases_ours, pred_cases_ours, proba_cases_sk, pred_cases_sk):
-        print(f"{name}: ours_p={p1:.4f} ours_y={int(c1)} | sklearn_p={p2:.4f} sklearn_y={int(c2)}")
+    # Case predictions
+    caseA = np.array([[8,2,-15,12,1]], dtype=float)
+    caseB = np.array([[14,5,25,0,0]], dtype=float)
+    out_cases = pd.DataFrame({
+        "case": ["A","B"],
+        "svm_scratch_prob": svm_predict_proba_linear(np.vstack([caseA,caseB]), w_svm, b_svm),
+        "svm_scratch_pred": [(caseA @ w_svm + b_svm >= 0).astype(int)[0], (caseB @ w_svm + b_svm >= 0).astype(int)[0]],
+        "svc_prob": svc.predict_proba(np.vstack([caseA,caseB]))[:,1],
+        "svc_pred": svc.predict(np.vstack([caseA,caseB])),
+        "dt_scratch_pred": [tree_predict(caseA, tree_root)[0], tree_predict(caseB, tree_root)[0]],
+        "dt_sklearn_pred": dtc.predict(np.vstack([caseA,caseB]))
+    })
+    out_cases.to_csv(os.path.join(OUT_DIR, "traffic_cases.csv"), index=False)
 
-    print(f"\nSaved outputs to: {os.path.abspath(OUT_DIR)}")
+    # Optional decision boundary (SVC) over (hour, precipitation)
+    try:
+        hmin,hmax = X_tr[:,0].min()-1, X_tr[:,0].max()+1
+        pmin,pmax = X_tr[:,3].min()-1, X_tr[:,3].max()+1
+        xx, yy = np.meshgrid(np.linspace(hmin,hmax,200), np.linspace(pmin,pmax,200))
+        means = traffic_df[feats].mean()
+        gridX = np.column_stack([xx.ravel(), np.full(xx.size, means["day_of_week"]),
+                                 np.full(xx.size, means["temperature"]),
+                                 yy.ravel(),
+                                 np.full(xx.size, round(means["event"]))])
+        zz = svc.predict(gridX).reshape(xx.shape)
+        plt.figure()
+        plt.contourf(xx, yy, zz, alpha=0.25, levels=[-0.5,0.5,1.5])
+        plt.scatter(X_tr[:,0], X_tr[:,3], c=y_tr, s=20, edgecolors="k")
+        plt.xlabel("hour"); plt.ylabel("precipitation")
+        plt.title("Traffic SVC decision boundary (hour vs precipitation)")
+        plt.savefig(os.path.join(OUT_DIR, "traffic_decision_boundary.png"), bbox_inches="tight", dpi=160)
+        plt.close()
+    except Exception:
+        pass
+
+    print("Done. Outputs in:", os.path.abspath(OUT_DIR))
 
 if __name__ == "__main__":
     main()
