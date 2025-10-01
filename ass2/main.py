@@ -13,122 +13,132 @@ from sklearn.metrics import mean_squared_error, accuracy_score, precision_score,
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 
-OUT_DIR = "./reports_out"
+OUT_DIR     = "./reports_out"
 FLIGHT_CSV  = "flight_delays_from_pdf.csv"
 TRAFFIC_CSV = "traffic_congestion_astana.csv"
 COLD_CSV    = "cold_days_from_pdf.csv"   # columns: year,cold_days_below_minus30
 
-# -------- Linear regression (Normal Equation) --------
-def linear_normal_eq(X: np.ndarray, y: np.ndarray):
+def fit_linear_from_scratch_normal_eq(X_with_bias: np.ndarray, y: np.ndarray):
     t0 = perf_counter()
-    theta, *_ = np.linalg.lstsq(X, y, rcond=None)
-    t = perf_counter() - t0
-    b = float(theta[0]); w = theta[1:].astype(float)
-    return w, b, t
+    theta, *_ = np.linalg.lstsq(X_with_bias, y, rcond=None)
+    train_time_s = perf_counter() - t0
+    bias = float(theta[0])
+    weights = theta[1:].astype(float)
+    return weights, bias, train_time_s
 
-# -------- Logistic regression (from scratch, GD + L2 on weights) --------
-def sigmoid(z):
+def _sigmoid_stable(z):
     z = np.clip(z, -500, 500)
     return 1.0 / (1.0 + np.exp(-z))
 
-def logistic_gd(Xb: np.ndarray, y: np.ndarray, lr=0.1, epochs=8000, l2=1e-4):
-    w = np.zeros(Xb.shape[1])
-    reg = np.r_[0.0, np.full(Xb.shape[1]-1, l2)]  # no penalty on bias
+def fit_logistic_from_scratch_gd_l2(
+    X_with_bias: np.ndarray,
+    y: np.ndarray,
+    lr: float = 0.1,
+    epochs: int = 8000,
+    l2: float = 1e-4,
+):
+    w_all = np.zeros(X_with_bias.shape[1])
+    reg = np.r_[0.0, np.full(X_with_bias.shape[1] - 1, l2)]  # no penalty on bias
     t0 = perf_counter()
     for _ in range(epochs):
-        p = sigmoid(Xb @ w)
-        grad = (Xb.T @ (p - y)) / len(y) + reg * w
-        w -= lr * grad
-    t = perf_counter() - t0
-    b = float(w[0]); weights = w[1:].copy()
-    return weights, b, t
+        p = _sigmoid_stable(X_with_bias @ w_all)
+        grad = (X_with_bias.T @ (p - y)) / len(y) + reg * w_all
+        w_all -= lr * grad
+    train_time_s = perf_counter() - t0
+    bias = float(w_all[0])
+    weights = w_all[1:].copy()
+    return weights, bias, train_time_s
 
-# -------- SVM (from scratch, linear, hinge loss, SGD) --------
-def svm_linear_sgd(X: np.ndarray, y: np.ndarray, C=1.0, epochs=60, lr0=0.2):
-    yb = np.where(y==1, 1.0, -1.0)
+def fit_svm_linear_from_scratch_sgd(
+    X: np.ndarray, y_binary01: np.ndarray, C: float = 1.0, epochs: int = 60, lr0: float = 0.2
+):
+    y_pm1 = np.where(y_binary01 == 1, 1.0, -1.0)
     w = np.zeros(X.shape[1], dtype=float)
     b = 0.0
     t0 = perf_counter()
     for epoch in range(epochs):
-        lr = lr0 / (1.0 + 0.1*epoch)
+        lr = lr0 / (1.0 + 0.1 * epoch)
         for i in range(len(X)):
-            margin = yb[i]*(np.dot(w, X[i]) + b)
+            margin = y_pm1[i] * (np.dot(w, X[i]) + b)
             if margin >= 1:
-                w -= lr * (w / (C*len(X)))
+                w -= lr * (w / (C * len(X)))  # only L2 shrink
             else:
-                w -= lr * (w / (C*len(X)) - yb[i]*X[i])
-                b += lr * yb[i]
-    t = perf_counter() - t0
-    return w, b, t
+                w -= lr * (w / (C * len(X)) - y_pm1[i] * X[i])
+                b += lr * y_pm1[i]
+    train_time_s = perf_counter() - t0
+    return w, b, train_time_s
 
-def svm_predict_proba_linear(X: np.ndarray, w: np.ndarray, b: float):
-    return sigmoid(X @ w + b)  # quick calibration
+def predict_proba_svm_linear_via_sigmoid(X: np.ndarray, w: np.ndarray, b: float):
+    """Quick non-calibrated probability proxy via sigmoid(w^T x + b)."""
+    return _sigmoid_stable(X @ w + b)
 
-# -------- Decision Tree (from scratch, binary splits, max_depth=3) --------
-class DTNode:
-    __slots__ = ("feat","thr","left","right","pred","depth")
+
+class TreeNode:
+    __slots__ = ("feat", "thr", "left", "right", "pred", "depth")
     def __init__(self, pred=None, feat=None, thr=None, left=None, right=None, depth=0):
-        self.pred = pred; self.feat = feat; self.thr = thr
-        self.left = left; self.right = right; self.depth = depth
+        self.pred = pred
+        self.feat = feat
+        self.thr = thr
+        self.left = left
+        self.right = right
+        self.depth = depth
 
 def gini_impurity(y):
-    if len(y)==0: return 0.0
-    p = np.mean(y==1)
-    return 2*p*(1-p)
+    if len(y) == 0:
+        return 0.0
+    p = np.mean(y == 1)
+    return 2 * p * (1 - p)
 
-def best_split(X, y):
+def tree_best_split(X, y):
     n, d = X.shape
-    best = (None, None, -1e9)
+    best_feat, best_thr, best_gain = None, None, -1e9
     for j in range(d):
-        vals = np.unique(X[:, j])
-        for thr in vals:
+        for thr in np.unique(X[:, j]):
             left = y[X[:, j] <= thr]
             right = y[X[:, j] > thr]
-            if len(left)==0 or len(right)==0: continue
-            gain = - (len(left)/n)*gini_impurity(left) - (len(right)/n)*gini_impurity(right)
-            if gain > best[2]:
-                best = (j, thr, gain)
-    return best[0], best[1]
+            if len(left) == 0 or len(right) == 0:
+                continue
+            gain = - (len(left)/n) * gini_impurity(left) - (len(right)/n) * gini_impurity(right)
+            if gain > best_gain:
+                best_feat, best_thr, best_gain = j, thr, gain
+    return best_feat, best_thr
 
-def build_tree(X, y, depth=0, max_depth=3, min_leaf=5):
-    if depth>=max_depth or len(np.unique(y))==1 or len(y)<2*min_leaf:
-        return DTNode(pred=int(np.round(np.mean(y))), depth=depth)
-    j, thr = best_split(X, y)
+def tree_build(X, y, depth=0, max_depth=3, min_leaf=5):
+    if depth >= max_depth or len(np.unique(y)) == 1 or len(y) < 2 * min_leaf:
+        return TreeNode(pred=int(np.round(np.mean(y))), depth=depth)
+    j, thr = tree_best_split(X, y)
     if j is None:
-        return DTNode(pred=int(np.round(np.mean(y))), depth=depth)
+        return TreeNode(pred=int(np.round(np.mean(y))), depth=depth)
     left_idx = X[:, j] <= thr
     right_idx = ~left_idx
-    if left_idx.sum()<min_leaf or right_idx.sum()<min_leaf:
-        return DTNode(pred=int(np.round(np.mean(y))), depth=depth)
-    left = build_tree(X[left_idx], y[left_idx], depth+1, max_depth, min_leaf)
-    right = build_tree(X[right_idx], y[right_idx], depth+1, max_depth, min_leaf)
-    return DTNode(feat=j, thr=thr, left=left, right=right, depth=depth)
+    if left_idx.sum() < min_leaf or right_idx.sum() < min_leaf:
+        return TreeNode(pred=int(np.round(np.mean(y))), depth=depth)
+    left = tree_build(X[left_idx], y[left_idx], depth + 1, max_depth, min_leaf)
+    right = tree_build(X[right_idx], y[right_idx], depth + 1, max_depth, min_leaf)
+    return TreeNode(feat=j, thr=thr, left=left, right=right, depth=depth)
 
-def tree_predict_one(x, node: DTNode):
+def tree_predict_row(x, node: TreeNode):
     while node.left is not None and node.right is not None:
         node = node.left if x[node.feat] <= node.thr else node.right
     return node.pred
 
-def tree_predict(X, root: DTNode):
-    return np.array([tree_predict_one(x, root) for x in X], dtype=int)
+def tree_predict(X, root: TreeNode):
+    return np.array([tree_predict_row(x, root) for x in X], dtype=int)
 
-# -------- Main --------
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-
-    # =========================
-    # Assignment 1: Linear Task
-    # =========================
     if os.path.exists(COLD_CSV):
         cold_df = pd.read_csv(COLD_CSV)
     else:
-        cold_df = pd.DataFrame(columns=["year","cold_days_below_minus30"])
+        cold_df = pd.DataFrame(columns=["year", "cold_days_below_minus30"])
 
-    if not cold_df.empty and {"year","cold_days_below_minus30"}.issubset(cold_df.columns):
-        lin_df = (cold_df[["year","cold_days_below_minus30"]]
-                  .apply(pd.to_numeric, errors="coerce")
-                  .dropna()
-                  .sort_values("year"))
+    if not cold_df.empty and {"year", "cold_days_below_minus30"}.issubset(cold_df.columns):
+        lin_df = (
+            cold_df[["year", "cold_days_below_minus30"]]
+            .apply(pd.to_numeric, errors="coerce")
+            .dropna()
+            .sort_values("year")
+        )
         if not lin_df.empty:
             lin_df = lin_df[lin_df["year"] >= 2010]
     else:
@@ -138,46 +148,54 @@ def main():
         X_lin = lin_df[["year"]].to_numpy(float)
         y_lin = lin_df["cold_days_below_minus30"].to_numpy(float)
 
-        Xb = np.c_[np.ones(len(X_lin)), X_lin]
-        w_lin, b_lin, t_lin_ours = linear_normal_eq(Xb, y_lin)
-        yhat_ours = (Xb @ np.r_[b_lin, w_lin]).ravel()
-        rmse_ours = float(np.sqrt(mean_squared_error(y_lin, yhat_ours)))
+        # ==== FROM SCRATCH ====
+        X_lin_with_bias = np.c_[np.ones(len(X_lin)), X_lin]
+        lin_w_scratch, lin_b_scratch, lin_time_scratch = fit_linear_from_scratch_normal_eq(
+            X_lin_with_bias, y_lin
+        )
+        lin_preds_train_scratch = (X_lin_with_bias @ np.r_[lin_b_scratch, lin_w_scratch]).ravel()
+        rmse_lin_scratch = float(np.sqrt(mean_squared_error(y_lin, lin_preds_train_scratch)))
 
+        # ==== SCIKIT-LEARN ====
         t0 = perf_counter()
-        sk_lin = LinearRegression().fit(X_lin, y_lin)
-        t_lin_sk = perf_counter() - t0
-        rmse_sk = float(np.sqrt(mean_squared_error(y_lin, sk_lin.predict(X_lin))))
+        lin_model_sklearn = LinearRegression().fit(X_lin, y_lin)
+        lin_time_sklearn = perf_counter() - t0
+        rmse_lin_sklearn = float(np.sqrt(mean_squared_error(y_lin, lin_model_sklearn.predict(X_lin))))
 
-        fy = np.array([2025, 2030, 2035], dtype=float).reshape(-1,1)
-        pred_ours = np.maximum(0, (np.c_[np.ones(len(fy)), fy] @ np.r_[b_lin, w_lin]).ravel())
-        pred_sk = np.maximum(0, sk_lin.predict(fy))
+        # Forecasts
+        future_years = np.array([2025, 2030, 2035], dtype=float).reshape(-1, 1)
+        preds_lin_scratch = np.maximum(
+            0,
+            (np.c_[np.ones(len(future_years)), future_years] @ np.r_[lin_b_scratch, lin_w_scratch]).ravel(),
+        )
+        preds_lin_sklearn = np.maximum(0, lin_model_sklearn.predict(future_years))
 
+        # Outputs
         pd.DataFrame({
-            "model": ["NormalEq (ours)", "scikit-learn"],
-            "coef": [float(w_lin[0]), float(sk_lin.coef_[0])],
-            "intercept": [float(b_lin), float(sk_lin.intercept_)],
-            "rmse": [rmse_ours, rmse_sk],
-            "train_time_s": [t_lin_ours, t_lin_sk]
+            "model": ["Linear-FromScratch(NormalEq)", "Linear-ScikitLearn"],
+            "coef": [float(lin_w_scratch[0]), float(lin_model_sklearn.coef_[0])],
+            "intercept": [float(lin_b_scratch), float(lin_model_sklearn.intercept_)],
+            "rmse": [rmse_lin_scratch, rmse_lin_sklearn],
+            "train_time_s": [lin_time_scratch, lin_time_sklearn],
         }).to_csv(os.path.join(OUT_DIR, "linear_summary.csv"), index=False)
 
         pd.DataFrame({
             "year": [2025, 2030, 2035],
-            "pred_days_ours": pred_ours,
-            "pred_days_sklearn": pred_sk
+            "pred_days_from_scratch": preds_lin_scratch,
+            "pred_days_sklearn": preds_lin_sklearn,
         }).to_csv(os.path.join(OUT_DIR, "linear_future_predictions.csv"), index=False)
 
-        # Plot
         plt.figure()
         plt.scatter(X_lin.ravel(), y_lin, label="Data (>=2010)")
-        x_all = np.concatenate([X_lin.ravel(), fy.ravel()])
-        xg = np.linspace(x_all.min(), x_all.max(), 200).reshape(-1,1)
-        ours_line = (np.c_[np.ones(len(xg)), xg] @ np.r_[b_lin, w_lin]).ravel()
-        sk_line = sk_lin.predict(xg)
-        plt.plot(xg.ravel(), ours_line, label="NormalEq (ours)")
-        plt.plot(xg.ravel(), sk_line, label="sklearn")
-        plt.scatter([2025,2030,2035], pred_ours, s=60, label="Predictions")
-        for yr, yv in zip([2025,2030,2035], pred_ours):
-            plt.annotate(f"{int(yr)}: {yv:.2f}", xy=(yr, yv), xytext=(5,5), textcoords="offset points")
+        x_all = np.concatenate([X_lin.ravel(), future_years.ravel()])
+        xg = np.linspace(x_all.min(), x_all.max(), 200).reshape(-1, 1)
+        line_scratch = (np.c_[np.ones(len(xg)), xg] @ np.r_[lin_b_scratch, lin_w_scratch]).ravel()
+        line_sklearn = lin_model_sklearn.predict(xg)
+        plt.plot(xg.ravel(), line_scratch, label="Linear-FromScratch")
+        plt.plot(xg.ravel(), line_sklearn, label="Linear-ScikitLearn")
+        plt.scatter([2025, 2030, 2035], preds_lin_scratch, s=60, label="Forecasts (scratch)")
+        for yr, yv in zip([2025, 2030, 2035], preds_lin_scratch):
+            plt.annotate(f"{int(yr)}: {yv:.2f}", xy=(yr, yv), xytext=(5, 5), textcoords="offset points")
         plt.xlabel("Year"); plt.ylabel("Days < −30°C")
         plt.title("Cold days (trained on ≥ 2010)")
         plt.legend()
@@ -187,53 +205,57 @@ def main():
         with open(os.path.join(OUT_DIR, "linear_INFO.txt"), "w") as f:
             f.write("No usable rows in cold_days_from_pdf.csv; linear task skipped.\n")
 
-    # ==================================
-    # Assignment 2: Logistic (7-row demo)
-    # ==================================
     log_df = pd.read_csv(FLIGHT_CSV)
-    X_log = log_df[["temperature","snowfall","wind","visibility"]].to_numpy(float)
+    X_log = log_df[["temperature", "snowfall", "wind", "visibility"]].to_numpy(float)
     y_log = log_df["delayed"].to_numpy(int)
 
-    Xb = np.c_[np.ones(len(X_log)), X_log]
-    w_log, b_log, t_log_ours = logistic_gd(Xb, y_log, lr=0.1, epochs=8000, l2=1e-4)
-    p_ours = sigmoid(Xb @ np.r_[b_log, w_log])
-    acc_ours = accuracy_score(y_log, (p_ours>=0.5).astype(int))
+    # ==== FROM SCRATCH ====
+    X_log_with_bias = np.c_[np.ones(len(X_log)), X_log]
+    log_w_scratch, log_b_scratch, log_time_scratch = fit_logistic_from_scratch_gd_l2(
+        X_log_with_bias, y_log, lr=0.1, epochs=8000, l2=1e-4
+    )
+    probs_log_scratch = _sigmoid_stable(X_log_with_bias @ np.r_[log_b_scratch, log_w_scratch])
+    acc_log_scratch = accuracy_score(y_log, (probs_log_scratch >= 0.5).astype(int))
 
+    # ==== SCIKIT-LEARN ====
     t0 = perf_counter()
-    sk_lr = LogisticRegression(max_iter=5000).fit(X_log, y_log)
-    t_log_sk = perf_counter() - t0
-    p_sk = sk_lr.predict_proba(X_log)[:,1]
-    acc_sk = accuracy_score(y_log, (p_sk>=0.5).astype(int))
+    log_model_sklearn = LogisticRegression(max_iter=5000).fit(X_log, y_log)
+    log_time_sklearn = perf_counter() - t0
+    probs_log_sklearn = log_model_sklearn.predict_proba(X_log)[:, 1]
+    acc_log_sklearn = accuracy_score(y_log, (probs_log_sklearn >= 0.5).astype(int))
 
+    # Cases A/B
     caseA = np.array([[-28, 1, 9, 2]], dtype=float)
     caseB = np.array([[-12, 0, 3, 10]], dtype=float)
 
-    # From-scratch model
-    pA_ours = sigmoid(np.c_[np.ones((1, 1)), caseA] @ np.r_[b_log, w_log]).item()
-    pB_ours = sigmoid(np.c_[np.ones((1, 1)), caseB] @ np.r_[b_log, w_log]).item()
+    probA_scratch = _sigmoid_stable(np.c_[np.ones((1, 1)), caseA] @ np.r_[log_b_scratch, log_w_scratch]).item()
+    probB_scratch = _sigmoid_stable(np.c_[np.ones((1, 1)), caseB] @ np.r_[log_b_scratch, log_w_scratch]).item()
 
-    # scikit-learn
-    pA_sk = sk_lr.predict_proba(caseA)[0, 1].item()
-    pB_sk = sk_lr.predict_proba(caseB)[0, 1].item()
+    probA_sklearn = log_model_sklearn.predict_proba(caseA)[0, 1].item()
+    probB_sklearn = log_model_sklearn.predict_proba(caseB)[0, 1].item()
 
+    # Outputs
     pd.DataFrame({
-        "model": ["From-scratch GD (L2=1e-4)", "scikit-learn"],
-        "accuracy": [acc_ours, acc_sk],
-        "train_time_s": [t_log_ours, t_log_sk],
-        "weights_or_coef": [np.round(w_log,6).tolist(), np.round(sk_lr.coef_.ravel(),6).tolist()],
-        "intercept": [b_log, float(sk_lr.intercept_[0])]
+        "model": ["Logistic-FromScratch(GD,L2=1e-4)", "Logistic-ScikitLearn"],
+        "accuracy": [acc_log_scratch, acc_log_sklearn],
+        "train_time_s": [log_time_scratch, log_time_sklearn],
+        "weights_or_coef": [
+            np.round(log_w_scratch, 6).tolist(),
+            np.round(log_model_sklearn.coef_.ravel(), 6).tolist(),
+        ],
+        "intercept": [log_b_scratch, float(log_model_sklearn.intercept_[0])],
     }).to_csv(os.path.join(OUT_DIR, "logistic_summary.csv"), index=False)
 
     pd.DataFrame({
-        "case": ["A(-28,1,9,2)","B(-12,0,3,10)"],
-        "ours_prob": [pA_ours, pB_ours],
-        "ours_class": [int(pA_ours>=0.5), int(pB_ours>=0.5)],
-        "sk_prob": [pA_sk, pB_sk],
-        "sk_class": [int(pA_sk>=0.5), int(pB_sk>=0.5)]
+        "case": ["A(-28,1,9,2)", "B(-12,0,3,10)"],
+        "prob_from_scratch": [probA_scratch, probB_scratch],
+        "class_from_scratch": [int(probA_scratch >= 0.5), int(probB_scratch >= 0.5)],
+        "prob_sklearn": [probA_sklearn, probB_sklearn],
+        "class_sklearn": [int(probA_sklearn >= 0.5), int(probB_sklearn >= 0.5)],
     }).to_csv(os.path.join(OUT_DIR, "logistic_cases.csv"), index=False)
 
-    # Optional plot: prob vs wind (others fixed at mean of demo table)
-    means = log_df[["temperature","snowfall","visibility"]].mean()
+    # Optional plot: probability vs wind (others fixed at means)
+    means = log_df[["temperature", "snowfall", "visibility"]].mean()
     wind_grid = np.linspace(log_df["wind"].min(), log_df["wind"].max(), 120)
     grid = np.column_stack([
         np.full_like(wind_grid, means["temperature"], dtype=float),
@@ -241,83 +263,104 @@ def main():
         wind_grid.astype(float),
         np.full_like(wind_grid, means["visibility"], dtype=float),
     ])
-    ours_curve = sigmoid(np.c_[np.ones(len(grid)), grid] @ np.r_[b_log, w_log])
-    sk_curve = sk_lr.predict_proba(grid)[:,1]
+    curve_scratch = _sigmoid_stable(np.c_[np.ones(len(grid)), grid] @ np.r_[log_b_scratch, log_w_scratch])
+    curve_sklearn = log_model_sklearn.predict_proba(grid)[:, 1]
     plt.figure()
-    plt.plot(wind_grid, ours_curve, label="From-scratch")
-    plt.plot(wind_grid, sk_curve, label="sklearn")
+    plt.plot(wind_grid, curve_scratch, label="Logistic-FromScratch")
+    plt.plot(wind_grid, curve_sklearn, label="Logistic-ScikitLearn")
     plt.xlabel("Wind (m/s)"); plt.ylabel("Delay probability")
     plt.title("Delay probability vs Wind (demo table)")
     plt.legend()
     plt.savefig(os.path.join(OUT_DIR, "logistic_prob_vs_wind.png"), bbox_inches="tight", dpi=160)
     plt.close()
 
-    # ============================================
-    # Assignment 3: Traffic Congestion (SVM & DT)
-    # ============================================
     traffic_df = pd.read_csv(TRAFFIC_CSV)
-    feats = ["hour","day_of_week","temperature","precipitation","event"]
-    X_tr = traffic_df[feats].to_numpy(float)
+    traffic_features = ["hour", "day_of_week", "temperature", "precipitation", "event"]
+    X_tr = traffic_df[traffic_features].to_numpy(float)
     y_tr = traffic_df["congestion"].to_numpy(int)
 
-    # SVM (scratch)
-    w_svm, b_svm, t_svm_ours = svm_linear_sgd(X_tr, y_tr, C=1.0, epochs=60, lr0=0.2)
-    yhat_svm = (X_tr @ w_svm + b_svm >= 0).astype(int)
-    acc_svm = accuracy_score(y_tr, yhat_svm)
-    prec_svm = precision_score(y_tr, yhat_svm)
-    rec_svm  = recall_score(y_tr, yhat_svm)
+    # ==== SVM — FROM SCRATCH (LINEAR) ====
+    svm_w_scratch, svm_b_scratch, svm_time_scratch = fit_svm_linear_from_scratch_sgd(
+        X_tr, y_tr, C=1.0, epochs=60, lr0=0.2
+    )
+    svm_preds_scratch = (X_tr @ svm_w_scratch + svm_b_scratch >= 0).astype(int)
+    svm_acc_scratch = accuracy_score(y_tr, svm_preds_scratch)
+    svm_prec_scratch = precision_score(y_tr, svm_preds_scratch)
+    svm_rec_scratch = recall_score(y_tr, svm_preds_scratch)
 
-    # Decision Tree (scratch)
+    # ==== DECISION TREE — FROM SCRATCH ====
     t0 = perf_counter()
-    tree_root = build_tree(X_tr, y_tr, max_depth=3, min_leaf=5)
-    t_dt_ours = perf_counter() - t0
-    yhat_dt = tree_predict(X_tr, tree_root)
-    acc_dt = accuracy_score(y_tr, yhat_dt)
-    prec_dt = precision_score(y_tr, yhat_dt)
-    rec_dt  = recall_score(y_tr, yhat_dt)
+    tree_root_scratch = tree_build(X_tr, y_tr, max_depth=3, min_leaf=5)
+    dt_time_scratch = perf_counter() - t0
+    dt_preds_scratch = tree_predict(X_tr, tree_root_scratch)
+    dt_acc_scratch = accuracy_score(y_tr, dt_preds_scratch)
+    dt_prec_scratch = precision_score(y_tr, dt_preds_scratch)
+    dt_rec_scratch = recall_score(y_tr, dt_preds_scratch)
 
-    # sklearn baselines
-    t0 = perf_counter(); svc = SVC(probability=True).fit(X_tr, y_tr); t_svm_sk = perf_counter()-t0
-    t0 = perf_counter(); dtc = DecisionTreeClassifier(max_depth=3).fit(X_tr, y_tr); t_dt_sk = perf_counter()-t0
-    yhat_svc = svc.predict(X_tr); yhat_dtc = dtc.predict(X_tr)
-    svc_metrics = dict(acc=accuracy_score(y_tr,yhat_svc), prec=precision_score(y_tr,yhat_svc), rec=recall_score(y_tr,yhat_svc))
-    dtc_metrics = dict(acc=accuracy_score(y_tr,yhat_dtc), prec=precision_score(y_tr,yhat_dtc), rec=recall_score(y_tr,yhat_dtc))
+    # ==== SCIKIT-LEARN BASELINES ====
+    t0 = perf_counter()
+    svc_model_sklearn = SVC(probability=True).fit(X_tr, y_tr)
+    svm_time_sklearn = perf_counter() - t0
 
+    t0 = perf_counter()
+    dtc_model_sklearn = DecisionTreeClassifier(max_depth=3).fit(X_tr, y_tr)
+    dt_time_sklearn = perf_counter() - t0
+
+    yhat_svc = svc_model_sklearn.predict(X_tr)
+    yhat_dtc = dtc_model_sklearn.predict(X_tr)
+    svc_metrics = dict(
+        acc=accuracy_score(y_tr, yhat_svc),
+        prec=precision_score(y_tr, yhat_svc),
+        rec=recall_score(y_tr, yhat_svc),
+    )
+    dtc_metrics = dict(
+        acc=accuracy_score(y_tr, yhat_dtc),
+        prec=precision_score(y_tr, yhat_dtc),
+        rec=recall_score(y_tr, yhat_dtc),
+    )
+
+    # Outputs
     pd.DataFrame([
-        {"model":"SVM-from-scratch", "acc":acc_svm, "prec":prec_svm, "rec":rec_svm, "train_time_s":t_svm_ours},
-        {"model":"DT-from-scratch (max_depth=3)", "acc":acc_dt, "prec":prec_dt, "rec":rec_dt, "train_time_s":t_dt_ours},
-        {"model":"SVC(sklearn)", "acc":svc_metrics["acc"], "prec":svc_metrics["prec"], "rec":svc_metrics["rec"], "train_time_s":t_svm_sk},
-        {"model":"DecisionTree(max_depth=3)", "acc":dtc_metrics["acc"], "prec":dtc_metrics["prec"], "rec":dtc_metrics["rec"], "train_time_s":t_dt_sk},
+        {"model": "SVM-FromScratch(Linear)", "acc": svm_acc_scratch, "prec": svm_prec_scratch, "rec": svm_rec_scratch, "train_time_s": svm_time_scratch},
+        {"model": "DecisionTree-FromScratch(max_depth=3)", "acc": dt_acc_scratch, "prec": dt_prec_scratch, "rec": dt_rec_scratch, "train_time_s": dt_time_scratch},
+        {"model": "SVC-ScikitLearn", "acc": svc_metrics["acc"], "prec": svc_metrics["prec"], "rec": svc_metrics["rec"], "train_time_s": svm_time_sklearn},
+        {"model": "DecisionTree-ScikitLearn(max_depth=3)", "acc": dtc_metrics["acc"], "prec": dtc_metrics["prec"], "rec": dtc_metrics["rec"], "train_time_s": dt_time_sklearn},
     ]).to_csv(os.path.join(OUT_DIR, "traffic_summary.csv"), index=False)
 
-    # Case predictions
-    caseA = np.array([[8,2,-15,12,1]], dtype=float)
-    caseB = np.array([[14,5,25,0,0]], dtype=float)
+    # Cases A/B for all models
+    caseA = np.array([[8, 2, -15, 12, 1]], dtype=float)
+    caseB = np.array([[14, 5, 25, 0, 0]], dtype=float)
+    cases_stack = np.vstack([caseA, caseB])
+
     out_cases = pd.DataFrame({
-        "case": ["A","B"],
-        "svm_scratch_prob": svm_predict_proba_linear(np.vstack([caseA,caseB]), w_svm, b_svm),
-        "svm_scratch_pred": [(caseA @ w_svm + b_svm >= 0).astype(int)[0], (caseB @ w_svm + b_svm >= 0).astype(int)[0]],
-        "svc_prob": svc.predict_proba(np.vstack([caseA,caseB]))[:,1],
-        "svc_pred": svc.predict(np.vstack([caseA,caseB])),
-        "dt_scratch_pred": [tree_predict(caseA, tree_root)[0], tree_predict(caseB, tree_root)[0]],
-        "dt_sklearn_pred": dtc.predict(np.vstack([caseA,caseB]))
+        "case": ["A", "B"],
+        "svm_from_scratch_prob": predict_proba_svm_linear_via_sigmoid(cases_stack, svm_w_scratch, svm_b_scratch),
+        "svm_from_scratch_pred": [(caseA @ svm_w_scratch + svm_b_scratch >= 0).astype(int)[0],
+                                  (caseB @ svm_w_scratch + svm_b_scratch >= 0).astype(int)[0]],
+        "svc_sklearn_prob": svc_model_sklearn.predict_proba(cases_stack)[:, 1],
+        "svc_sklearn_pred": svc_model_sklearn.predict(cases_stack),
+        "dt_from_scratch_pred": [tree_predict(caseA, tree_root_scratch)[0], tree_predict(caseB, tree_root_scratch)[0]],
+        "dt_sklearn_pred": dtc_model_sklearn.predict(cases_stack),
     })
     out_cases.to_csv(os.path.join(OUT_DIR, "traffic_cases.csv"), index=False)
 
-    # Optional decision boundary (SVC) over (hour, precipitation)
+    # Optional: SVC decision boundary over (hour, precipitation)
     try:
-        hmin,hmax = X_tr[:,0].min()-1, X_tr[:,0].max()+1
-        pmin,pmax = X_tr[:,3].min()-1, X_tr[:,3].max()+1
-        xx, yy = np.meshgrid(np.linspace(hmin,hmax,200), np.linspace(pmin,pmax,200))
-        means = traffic_df[feats].mean()
-        gridX = np.column_stack([xx.ravel(), np.full(xx.size, means["day_of_week"]),
-                                 np.full(xx.size, means["temperature"]),
-                                 yy.ravel(),
-                                 np.full(xx.size, round(means["event"]))])
-        zz = svc.predict(gridX).reshape(xx.shape)
+        hmin, hmax = X_tr[:, 0].min() - 1, X_tr[:, 0].max() + 1
+        pmin, pmax = X_tr[:, 3].min() - 1, X_tr[:, 3].max() + 1
+        xx, yy = np.meshgrid(np.linspace(hmin, hmax, 200), np.linspace(pmin, pmax, 200))
+        means = traffic_df[traffic_features].mean()
+        gridX = np.column_stack([
+            xx.ravel(),
+            np.full(xx.size, means["day_of_week"]),
+            np.full(xx.size, means["temperature"]),
+            yy.ravel(),
+            np.full(xx.size, round(means["event"])),
+        ])
+        zz = svc_model_sklearn.predict(gridX).reshape(xx.shape)
         plt.figure()
-        plt.contourf(xx, yy, zz, alpha=0.25, levels=[-0.5,0.5,1.5])
-        plt.scatter(X_tr[:,0], X_tr[:,3], c=y_tr, s=20, edgecolors="k")
+        plt.contourf(xx, yy, zz, alpha=0.25, levels=[-0.5, 0.5, 1.5])
+        plt.scatter(X_tr[:, 0], X_tr[:, 3], c=y_tr, s=20, edgecolors="k")
         plt.xlabel("hour"); plt.ylabel("precipitation")
         plt.title("Traffic SVC decision boundary (hour vs precipitation)")
         plt.savefig(os.path.join(OUT_DIR, "traffic_decision_boundary.png"), bbox_inches="tight", dpi=160)
