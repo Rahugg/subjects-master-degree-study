@@ -1,0 +1,55 @@
+1. Introduction
+In recent years, music plagiarism has become a 
+serious issue in the music industry. With growing use
+of the World Wide Web, the revenue loss due to
+plagiarism and pirate copies has been escalating
+exponentially. In Korea, it is estimated to be more than 
+2 billion dollar (2009) [1]. The proposed music 
+plagiarism detection system should be a welcome news 
+to the music industry. Music often characterized by its melody, harmony, 
+rhythm and timbre. Amongst these characteristics of 
+music, melody is considered to be the most creative 
+specific and expressive element that characterizes
+music. With respect to melody, Korea Entertainment 
+law society conducted a survey to find out what people 
+considered music plagiarism to be. From the survey, 
+music plagiarism is suspected under the following 
+cases [2]:
+1. When two music have similar successive
+melody notes, plagiarism can be suspected. 2. When two music share the unique parts of
+melody which is rarely uses in others, plagiarism can be suspected. 3. When music has similar melody progress with 
+different key and instruments, plagiarism can be 
+suspected.
+With this in mind, the music plagiarism detection 
+system is developed in this paper. Music plagiarism 
+detection systems had been studied in the past but only 
+with MIDI as input. [3]. This system receives PCM 
+data as a query and extracts melody from it. Then, it 
+calculates the melody similarity to the music in the 
+database and retrieves the plagiarized music.
+This paper is organized as follows. Section 2 shows 
+whole system to detect music plagiarism. Section 3 
+describes melody extraction algorithm from 
+polyphonic music via harmonic model. Section 4 
+represents symbolic melody similarity calculation 
+based on string matching algorithm. Section 5 
+describes music plagiarism detecting system and 
+experiments. Finally, section 6 concludes this paper.
+2. System Overview
+The system is composed of four modules as
+illustrated in Fig. 1: (1)Melody Extraction Module, 
+(2)Melody-to-MIDI Module, (3)Similarity Calculation 
+Modules and (4)Common Subsequence Search 
+Modules. The system receives as input a polyphonic 
+music (PCM data) and outputs information of
+plagiarized music (music title, time, etc.). In the Melody Extraction Modules, melody of the 
+query music is extracted. In the Melody-to-MIDI 
+Conversion Modules, the melody pitch sequence is 
+converted into a note sequence which is appropriate for 
+MIDI format. In Similarity Calculation Modules, the 
+similarity between the note sequence of the input 
+polyphonic music and those of music in the database is 
+calculated. In the Common Subsequence Search 
+Modules, the similar section of the music in the 
+database is detected. Thus, the overall system can 
+detect a plagiarized music and its similar section.

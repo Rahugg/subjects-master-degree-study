@@ -1,0 +1,55 @@
+Introduction 
+Recently, the use of various types of multimedia data such as images, videos, and 
+audios has shown its explosive growth, so the content-based search became of great 
+importance[12][7][13][5][4][3]. For the successful content-based search, an indexing 
+scheme and a query processing scheme are the key issues to be considered. Despite of 
+its great advance, audio search has been less investigated than either image or video 
+searches [8]. 
+In this paper, we address the development of a system that detects plagiarism 
+based on the similar melody searching, which is an operation that finds the melodies 
+similar to a given query melody from a music database. Specifically, the plagiarism 
+detection system is to examine if there exist such melodies in music databases as 
+being similar to any melodies of a composerís interest. Without realizing it, any composers may be involved in diverse plagiarism disputes. The main purpose of this 
+research is to help composers to avoid unnecessary plagiarism disputes by using the 
+plagiarism detection system in advance. 
+Unlike such previous systems as [6][8][9][10], our plagiarism detection system has 
+its unique characteristics as follows: 
+• A novel similarity model: it solves the problem of misjudgment by supporting 
+alignment as well as shifting in the similarity model. 
+• Multidimensional indexing: it makes a basic framework for fast searching by employing a multidimensional index built on melody features. 
+Music Plagiarism Detection Using Melody Databases 685 
+• A three-step query processing: it provides fast search ability by taking a three-step 
+query processing method, which consists of index searching, window stitching, 
+and post-processing. 
+The results of performance evaluation show that our approach outperforms the sequential-scan-based one in the speed of searching up to around 31 times. 
+This paper is organized as follows. Section 2 describes a novel similarity model for 
+computing the similarity between two different melodies. Section 3 discusses an indexing method for efficient similar melody searching from melody databases. Section 
+4 presents a three-step query processing method which employs the proposed indexing method. To show its superiority, we evaluate the performance of our system in 
+Section 5. Finally, Section 6 summarizes and concludes the paper. 
+2 Similarity Model 
+This section describes a similarity model to compute the similarity between two different melodies. 
+2.1 Basic Model 
+A melody of a music is defined as a list of snatches, i.e. as a sequence S = <(si, sLi)> 
+(0<=i<n), called a melody sequence. Here, si denotes the ith tone of a melody, and sLi
+denotes the length of the ith tone of a melody. Also, the number of tones, n, is called 
+the length of a melody sequence. For example, the following melody with a C major 
+key in four-quarters time is described as a melody sequence of length 4, i.e. <(sol, 1), 
+(la, 1/2), (la, 1/2), (fa, 2)>1. 
+For comparison of any two melody sequences S = <(si, sLi)>(0<=i<n) and Q = 
+<(qj, qLj)>(0<=j<m), we make the following assumptions: 
+• Assumption 1: S and Q should have the same meter. In other words, two melody 
+sequences of different meters are excluded for similarity searching. 
+• Assumption 2: It always holds that n=m and sLi = qLj if i=j, for all (i, j)'s. Thus, 
+two melody sequences to be compared should be of the same length, and the 
+lengths of their corresponding tones should be also the same. 
+For any two melody sequences S and Q satisfying these assumptions, the similarity 
+between S and Q is computed based on Definition 1 described below. 
+
+This paper addresses the development of a system that detects plagiarism based on similar melody searching. Similar melody searching is to find 
+the melodies similar to a given query melody from a music database. For this 
+purpose, we propose a novel similarity model that supports alignment as well as 
+shifting. Also, we suggest a method for indexing the features extracted from 
+every melody, and a method for processing plagiarism detection by using the 
+index. With our plagiarism detection system, composers can easily search for 
+the melodies similar to their ones from music databases. Through performance 
+evaluation via a series of experiments, we show the effectiveness of our approach. The results reveal that our approach outperforms the sequential-scanbased one in speed up to around 31 times. 

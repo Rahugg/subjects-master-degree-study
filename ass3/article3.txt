@@ -1,0 +1,40 @@
+Music is an art whose production is very difficult. Artists work for years just to produce one song. 
+Every song produced by an artist is unique. Music plagiarism is an insult to these peoples work because the 
+plagiarizer doesnt know the blood sweat and toil that goes into one song. Music plagiarism is not a new 
+phenomena. It has been going for many years. However only recently with access to the internet and there by a 
+huge range of song we have come to realise just how many songs are fake. The problem with this detecting 
+plagiarism is that people are biased. So they cant be wholly relied on. Another thing is that when proving 
+plagiarism especially in a court of law perception of people (experts)can vary. What is needed is a way to 
+quantitatively and scientifically prove plagiarism in music. This will lead to a more reliable accurate and 
+effective means of detection. our project set out to be a beacon of truth to expose plagiarizers and give back 
+dignity to the art that is music.
+By using mfcc, entropy and mean energy level we have created a robust fingerprinting algorithm 
+,which enables us to differentiate copies from original music.these three features have been chosen because of 
+two major considerations.The first being that an algorithm that is extremely efficient meaning that it pin points 
+plagiarism easily and without error. The second consideration is the processing time that is the time required for 
+our algorithm to obtain a result.through out the project. We struggle to balance these two factors and finally we 
+decided to take these three factors. par Our comparison through taking the Euclidian distance of vector 
+quantisation of features mentioned above allows us to do so. Inspite the rise of plagiarism in reason years we 
+believe this algorithm could be usefull in playing a vital role in stamping out plagiarism. More features can be 
+added and the code can be better optimised so in the future music plagiarism becomes a thing of the past.
+
+Abstract: Music plagiarism detector is an alternative approach for music genre classification which converts 
+the audio signal into spectrograms and then extracts features from this visual representation. The idea is that 
+treating the time-frequency representation as a texture image we can extract features to build reliable music 
+genre classification systems. The proposed approach also takes into account a zoning mechanism to perform 
+local feature extraction, which has been proved to be quite efficient. The feature include MFCC, energy, entropy 
+etc. In this we suggest a method for indexing the features extracted from every melody and a method for 
+processing plagiarism detection by using the index. With our plagiarism detection system, composers can easily 
+search for the melodies similar to their ones from music databases. Furthermore, for applications such as radio 
+monitoring, search times on the order of a few milliseconds per query are attained, even on a massive music 
+database.
+Abstract: Music plagiarism detector is an alternative approach for music genre classification which converts 
+the audio signal into spectrograms and then extracts features from this visual representation. The idea is that 
+treating the time-frequency representation as a texture image we can extract features to build reliable music 
+genre classification systems. The proposed approach also takes into account a zoning mechanism to perform 
+local feature extraction, which has been proved to be quite efficient. The feature include MFCC, energy, entropy 
+etc. In this we suggest a method for indexing the features extracted from every melody and a method for 
+processing plagiarism detection by using the index. With our plagiarism detection system, composers can easily 
+search for the melodies similar to their ones from music databases. Furthermore, for applications such as radio 
+monitoring, search times on the order of a few milliseconds per query are attained, even on a massive music 
+database

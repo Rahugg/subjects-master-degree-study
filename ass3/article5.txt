@@ -1,0 +1,22 @@
+Rhythm Plagiarism
+A prominent example for rhythm plagiarism is the so-called Amen Break. It originates from the 1969 
+Funk recording Amen Brother by The Winstons and is considered one of the most widely used drum loops in 
+the history of Rap and Electronic music. Some of such extraordinary beats are pro-tected by the law. But it is 
+often difficult to judge, whether two songs share the same rhythm. There is no definition of which instrument is 
+playing the rhythm. Commonly, the drums make up the beat. But a guitar can also be a dominant rhythmical 
+instrument. In general, rhythm is formed by periodical pattern of accents in the amplitude envelopes of different 
+frequency bands. Rhythm plagiarism has been scarcely covered in the litErature but it is closely related to rhythm similarity estimation
+Paulus and Klapuri took the melody as a reference for rhythm
+They transformed the melody into rhythmical strings which are easier to compare along structural dimensions. 
+Others extracted rhythmical features such as the beat spectrum or tempo in order to measure rhythmical 
+similarity.
+Melody Plagiarism
+Copied melodies are less obvious than the previously ex-plained plagiarism types. A melodic motive is 
+considered to be identical, even if it is transposed to another key, slowed down, sped up or interpreted with 
+different rhythmic accentuation. Thus, melody plagiarism is a gray area, where it is hard to discern copying 
+from citation. However, MIR techniques are suited for inspection of such cases. In the MIR literature, a closely 
+related task is Query-by-Humming (QbH). QbH can be used to retrieve songs from a database by letting the user 
+hum or sing the respective melody. Melody plagiarism inspection can be done with basically the same approach, 
+since means to identify and evaluate melodic similarity are required. The main difference is, that QbH searches 
+across extensive databases while plagiarism detection concentrates on one single comparison, which has to be 
+more precise.

@@ -1,0 +1,39 @@
+Introduction
+
+Aided by the internet, plagiarism is now noticeable globally ,not just across authors, but also across languages and countries. 
+In 2008 alone, 1.4 billion music tracks were sold internationally. This number has since increased to over 1.8 
+billion. In2004, the SACEM, an organization that seeks to protect the rights of the original authors, composers 
+and publishers, was able to manually check only a small percentage of registered pieces for potential copyright 
+violations. With such vast numbers of tracks to monitor, the need for automatic techniques for identification of 
+potential copyright violations and detection of music-plagiarism is clear and paramount.
+With the development of digital media technology, people are routinely exposed to music in everyday 
+environmentscar, home, restaurant, theater and shopping mallbut are frustrated by not being able to learn more 
+about what they hear. They may, for instance, be interested in a particular piece of music and want to know its 
+title and the name of the artist who created it. In this project Each audio file is fingerprinted, The fingerprints 
+from the unknown sample are matched against a large set of fingerprints derived from the music database. The 
+candidate matches are subsequently evaluated for correctness of match. Music-plagiarism is the use or close 
+imitation of an-other authors music without proper acknowledgement. Every year ,vast numbers of new music 
+tracks are released globally, and questionable similarities exist in some sections of music tracks. 
+
+
+II. Types Of Plagiarism
+A clear and precise definition of the term plagiarism is difficult to derive. However, the notion of 
+intellectual property is known since ancient times. A poet named Martial called another poet kidnapper (lat. 
+plagiarius), because he presented Martials poems without permission and claimed that these were his own. This 
+incident is perceived as the first mention-ing of authors rights, even though an established copyright was 
+unknown . Authorship became more important with the invention of letterpress printing in the late 15th century. 
+In the realm of music, it became common practice to credit the composer for his sheet music since the 16th 
+century.
+2.1. Sampling Plagiarism
+The term sampling describes the re-use of recorded sounds or music excerpts in another song . The 
+samples are often manipulated in pitch or tempo to fit the rhythm and tonality of the new song. It is very 
+common to mix additional instruments to the sample, such as additional vocals or drums. The most common use 
+of samples is to crop an excerpt of one or more bars and loop them. More elaborate forms of sampling include 
+rearrangement and post-processing of the respective sample beyond recognition. Sampling has strongly 
+influenced popular music culture. Thus, there exist websites4,where sampling cases are collected by a 
+community of music aficionados. Due to the fact that sampling is basically the use of a song in a song it is 
+Music Plagiarism Detector
+National Conference On Discrete Mathematics & Computing (NCDMC-2017) 9 | Page
+related to the task of cover song detection. Cover song detection is commonly approached by chroma feature. A 
+more recent approach is presented in , where a well-known audio fingerprinting algorithm is modified in order 
+to retrieve samples inside songs, based on spectral peak signatures.
